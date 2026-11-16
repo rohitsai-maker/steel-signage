@@ -11,9 +11,13 @@ android {
         applicationId = "com.steelsignage.player"
         minSdk = 21          // Android 5.0+ (covers almost every Android TV / TV box / Fire TV)
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+        // Where the TV gets its content when nothing is configured on the TV itself.
+        // A GitHub release link = simple mode (no server). Set to "" to always ask for a server address.
+        buildConfigField("String", "DEFAULT_SOURCE", "\"https://github.com/rohitsai-maker/steel-signage/releases/tag/gym-screen\"")
     }
+    buildFeatures { buildConfig = true }
 
     buildTypes {
         release {
