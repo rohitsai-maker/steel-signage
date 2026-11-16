@@ -194,14 +194,14 @@ class MainActivity : Activity() {
         setupView.visibility = View.GONE
         hideSystemUi()
         version = null
-        // Offline first: play the last known playlist immediately if we have it
-        prefs.getString("lastContent", null)?.let { cached ->
-            runCatching { applyContent(JSONObject(cached), fromCache = true) }
-        }
         if (items.isEmpty()) showMessage(getString(R.string.connecting), null, serverUrl)
 
         pollJob?.cancel()
         pollJob = scope.launch {
+            // Offline first: play the last known playlist immediately if we have it
+            prefs.getString("lastContent", null)?.let { cached ->
+                try { applyContent(JSONObject(cached), fromCache = true) } catch (e: Exception) { }
+            }
             var registered = false
             while (isActive) {
                 try {
