@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Steel Signage</string>
+    <string name="connecting">Connecting…</string>
+    <string name="setup_hint">Enter the address of your Steel Signage server, then press Save.\nPress MENU on the remote (or BACK 5 times) anytime to return here.</string>
+    <string name="save_start">Save &amp; start</string>
+    <string name="allow_autostart">Allow auto-start on boot</string>
+</resources>
