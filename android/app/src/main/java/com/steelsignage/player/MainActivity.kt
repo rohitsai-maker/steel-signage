@@ -75,7 +75,15 @@ class MainActivity : Activity() {
     private var nowPlaying = ""
     private val backPresses = ArrayList<Long>()
 
-    private val serverUrl get() = prefs.getString("server", "")!!.trimEnd('/')
+    /** Server URL, or a GitHub release link (simple mode). Falls back to the address built into the app. */
+    private val serverUrl get() = prefs.getString("server", "")!!.trimEnd('/').ifEmpty { BuildConfig.DEFAULT_SOURCE.trimEnd('/') }
+
+    /** Simple mode: content = files attached to a GitHub release, e.g. https://github.com/owner/repo/releases/tag/gym-screen */
+    private val githubSource: Triple<String, String, String>?
+        get() = Regex("""github\.com/([^/]+)/([^/]+)/releases/tag/([^/?#\s]+)""").find(serverUrl)?.destructured
+            ?.let { (o, r, t) -> Triple(o, r, t) }
+    private var githubEtag: String? = null
+    private var githubBackoffUntil = 0L
     private val deviceId: String
         get() = prefs.getString("deviceId", null) ?: ("tv-" + UUID.randomUUID().toString()).also {
             prefs.edit().putString("deviceId", it).apply()
@@ -204,6 +212,19 @@ class MainActivity : Activity() {
             }
             var registered = false
             while (isActive) {
+                if (githubSource != null) {
+                    // ---- Simple mode: read files from a GitHub release (no server needed)
+                    try {
+                        val json = withContext(Dispatchers.IO) { fetchGithub() }
+                        if (json != null) applyContent(json, fromCache = false)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (items.isEmpty()) showMessage("Cannot reach GitHub — retrying…", null, e.message ?: "")
+                    }
+                    delay(60_000)
+                    continue
+                }
                 try {
                     var json = withContext(Dispatchers.IO) {
                         if (!registered) register() else {
@@ -254,7 +275,9 @@ class MainActivity : Activity() {
         }
         if (list.isEmpty()) {
             stopPlayback(); items = emptyList(); version = newVersion
-            showMessage("${json.optString("screenName", "Screen")} is paired ✓",
+            if (githubSource != null) showMessage("Steel Signage is ready ✓", null,
+                "No photos or videos yet.\nAdd files to the GitHub release \"${json.optString("screenName")}\" and they will appear here within a minute.")
+            else showMessage("${json.optString("screenName", "Screen")} is paired ✓",
                 null, "Assign a playlist with files to this screen in the admin panel.")
             if (!fromCache) prefs.edit().putString("lastContent", json.toString()).apply()
             return
@@ -270,7 +293,7 @@ class MainActivity : Activity() {
                         if (firstTime) withContext(Dispatchers.Main) {
                             showMessage("Downloading ${i + 1} of ${list.size}…", null, it.name)
                         }
-                        download("$serverUrl${it.url}", f)
+                        download(if (it.url.startsWith("http")) it.url else "$serverUrl${it.url}", f)
                     }
                 }
                 // Clean up files no longer used
@@ -373,6 +396,56 @@ class MainActivity : Activity() {
     }
 
     private fun hideMessage() { messageView.visibility = View.GONE }
+
+    // ---------------------------------------------------------------- simple mode (GitHub release)
+    /**
+     * Reads the files attached to a GitHub release and turns them into a playlist.
+     * Files play in name order (prefix them 01-, 02-, … to choose the order).
+     * Images show 10 s, or put the time in the name: "offer_20s.jpg" shows 20 s.
+     * Returns null when nothing changed (HTTP 304 — does not use up GitHub's rate limit).
+     */
+    private fun fetchGithub(): JSONObject? {
+        val (owner, repo, tag) = githubSource ?: return null
+        if (System.currentTimeMillis() < githubBackoffUntil) return null
+        val c = URL("https://api.github.com/repos/$owner/$repo/releases/tags/$tag").openConnection() as HttpURLConnection
+        c.connectTimeout = 10_000; c.readTimeout = 15_000
+        c.setRequestProperty("Accept", "application/vnd.github+json")
+        c.setRequestProperty("User-Agent", "SteelSignage-TV")
+        githubEtag?.let { c.setRequestProperty("If-None-Match", it) }
+        try {
+            when (c.responseCode) {
+                304 -> return null
+                403, 429 -> { githubBackoffUntil = System.currentTimeMillis() + 10 * 60_000; return null }
+                404 -> throw RuntimeException("GitHub release \"$tag\" not found")
+                !in 200..299 -> throw RuntimeException("GitHub HTTP ${c.responseCode}")
+            }
+            githubEtag = c.getHeaderField("ETag")
+            val rel = JSONObject(c.inputStream.bufferedReader().readText())
+            val assets = rel.optJSONArray("assets") ?: org.json.JSONArray()
+            val images = setOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+            val videos = setOf("mp4", "m4v", "webm", "mkv", "mov")
+            val list = (0 until assets.length()).map { assets.getJSONObject(it) }
+                .filter { it.optString("name").substringAfterLast('.', "").lowercase() in images + videos }
+                .sortedBy { it.optString("name").lowercase() }
+            val out = org.json.JSONArray()
+            val sig = StringBuilder()
+            list.forEach { a ->
+                val name = a.getString("name")
+                val ext = name.substringAfterLast('.').lowercase()
+                val type = if (ext in videos) "video" else "image"
+                val secs = Regex("""[_-](\d{1,4})s\.[A-Za-z0-9]+$""").find(name)?.groupValues?.get(1)?.toInt() ?: 10
+                val id = a.get("id").toString()
+                sig.append(id).append(a.optString("updated_at")).append(';')
+                out.put(JSONObject()
+                    .put("id", id).put("name", name).put("type", type)
+                    .put("url", a.getString("browser_download_url"))
+                    .put("file", "$id.$ext").put("size", a.optLong("size"))
+                    .put("duration", if (type == "image") secs else 0))
+            }
+            return JSONObject().put("paired", true).put("screenName", tag).put("orientation", "landscape")
+                .put("version", sig.toString().hashCode().toString()).put("items", out)
+        } finally { c.disconnect() }
+    }
 
     // ---------------------------------------------------------------- networking
     private fun httpGet(url: String): JSONObject {
