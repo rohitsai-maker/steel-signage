@@ -122,28 +122,52 @@ const secsOf = n => { const m = /[_-](\d{1,4})s\.[a-z0-9]+$/i.exec(n); return m 
 const fmt = s => s >= 60 ? `${Math.floor(s/60)}m ${Math.round(s%60)}s` : `${Math.round(s)}s`;
 const ago = d => { const s = (Date.now() - new Date(d)) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s/60)+' min ago'; if (s < 86400) return Math.floor(s/3600)+' h ago'; return new Date(d).toLocaleString(); };
 
+// GitHub allows 60 unauthenticated checks per hour per internet connection.
+// "no-cache" makes the browser re-check with an ETag: an unchanged answer (HTTP 304) does NOT count.
+// The last good answer is saved, so the page still shows the list if GitHub says "limit reached".
+async function gh(path) {
+  const key = 'ss:' + path;
+  try {
+    const r = await fetch(API + path, { cache: 'no-cache' });
+    if (r.ok) { const j = await r.json(); try { localStorage.setItem(key, JSON.stringify(j)); } catch {} return { data: j }; }
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(key)); } catch {}
+    const reset = r.headers.get('x-ratelimit-reset');
+    const until = reset ? new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+    if (r.status === 403 || r.status === 429) return { data: saved, limited: until || 'a few minutes' };
+    throw new Error('GitHub error ' + r.status);
+  } catch (e) {
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(key)); } catch {}
+    if (saved) return { data: saved, offline: true };
+    throw e;
+  }
+}
+
 async function load() {
   try {
-    const r = await fetch(`${API}/releases/tags/${TAG}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(r.status === 403 ? 'GitHub limit reached, try again in a few minutes' : 'GitHub error ' + r.status);
-    const rel = await r.json();
+    const res = await gh(`/releases/tags/${TAG}`);
+    const rel = res.data;
+    if (!rel) {
+      $('status').innerHTML = '<span class="err">Busy</span>';
+      $('list').innerHTML = `<div class="empty" style="grid-column:1/-1">GitHub's free check limit for your internet connection is used up.<br>It resets at <b>${esc(res.limited)}</b>. The TVs are not affected and keep playing.</div>`;
+      return;
+    }
     items = rel.assets.filter(a => IMG.concat(VID).includes(ext(a.name)))
       .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
       .map(a => ({ name: a.name, url: a.browser_download_url, type: VID.includes(ext(a.name)) ? 'video' : 'image',
                    secs: VID.includes(ext(a.name)) ? null : secsOf(a.name), size: a.size, updated: a.updated_at }));
     const last = [rel.published_at, ...rel.assets.map(a => a.updated_at)].filter(Boolean).sort().pop();
-    $('status').innerHTML = '<span class="dot"></span>Live';
+    $('status').innerHTML = res.limited ? `<span class="dot" style="background:#f59e0b"></span>Saved copy` : '<span class="dot"></span>Live';
     $('count').textContent = items.length + (items.length === 1 ? ' file' : ' files');
     $('updated').textContent = last ? ago(last) : '–';
     render();
+    if (res.limited) $('list').insertAdjacentHTML('afterbegin', `<div class="empty" style="grid-column:1/-1;padding:10px">Showing the last saved list. Live check resumes at <b>${esc(res.limited)}</b>. TVs are not affected.</div>`);
   } catch (e) {
     $('status').innerHTML = '<span class="err">Offline</span>';
     $('list').innerHTML = `<div class="empty err">${esc(e.message)}</div>`;
   }
-  try {
-    const l = await (await fetch(`${API}/releases/latest`, { cache: 'no-store' })).json();
-    if (l.tag_name) $('apkVer').textContent = `Version ${l.tag_name} · Android TV / Fire TV / TV box`;
-  } catch {}
+  if (!load.apkDone) {
+    try { const l = (await gh('/releases/latest')).data; if (l && l.tag_name) { $('apkVer').textContent = `Version ${l.tag_name} · Android TV / Fire TV / TV box`; load.apkDone = true; } } catch {}
+  }
 }
 
 function render() {
@@ -185,7 +209,9 @@ function alertBox() { $('list').scrollIntoView({ behavior: 'smooth' }); }
 $('refresh').onclick = load;
 
 load();
-setInterval(load, 60000);
+// Re-check every 5 minutes, only while the page is open on screen
+setInterval(() => { if (document.visibilityState === 'visible') load(); }, 300000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
 </script>
 </body>
 </html>
