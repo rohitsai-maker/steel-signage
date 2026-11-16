@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steel Signage Player</title>
+<style>
+  html, body { margin:0; height:100%; background:#000; overflow:hidden; cursor:none; font-family:system-ui, sans-serif; color:#fff; }
+  #stage { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  #stage img, #stage video { width:100%; height:100%; object-fit:contain; }
+  #stage.portrait { width:100vh; height:100vw; inset:auto; left:50%; top:50%; transform:translate(-50%,-50%) rotate(90deg); }
+  #stage.portrait-flipped { width:100vh; height:100vw; inset:auto; left:50%; top:50%; transform:translate(-50%,-50%) rotate(-90deg); }
+  #stage.landscape-flipped { transform:rotate(180deg); }
+  #msg { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:#0f1115; }
+  #msg .code { font-size:14vw; font-weight:700; letter-spacing:2vw; margin:2vh 0; }
+  #msg .hint { font-size:2.4vw; color:#8b93a3; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="msg"><div class="hint">Connecting…</div></div>
+<script>
+const POLL_MS = 15000;
+let deviceId;
+try { deviceId = localStorage.getItem('steelsignage.deviceId'); } catch {}
+if (!deviceId) { deviceId = 'web-' + crypto.randomUUID(); try { localStorage.setItem('steelsignage.deviceId', deviceId); } catch {} }
+
+let content = null, index = -1, timer = null, current = '';
+const stage = document.getElementById('stage'), msg = document.getElementById('msg');
+
+function showMessage(html) { msg.innerHTML = html; msg.style.display = 'flex'; }
+function hideMessage() { msg.style.display = 'none'; }
+
+async function register() {
+  const r = await fetch('/api/player/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, info: { userAgent: navigator.userAgent.slice(0, 120), platform: 'web' } }) });
+  return r.json();
+}
+async function poll() {
+  try {
+    let data = await (await fetch(`/api/player/${deviceId}/content?playing=${encodeURIComponent(current)}`)).json();
+    if (data.reRegister) data = await register();
+    apply(data);
+  } catch (e) { if (!content) showMessage('<div class="hint">Cannot reach server — retrying…</div>'); }
+}
+function apply(data) {
+  if (!data.paired) {
+    content = null; clearTimeout(timer); stage.innerHTML = '';
+    showMessage(`<div class="hint">Enter this code in the Steel Signage admin panel → Screens</div><div class="code">${data.pairCode}</div><div class="hint">${location.host}</div>`);
+    return;
+  }
+  stage.className = data.orientation || 'landscape';
+  if (!content || content.version !== data.version) {
+    content = data; index = -1;
+    if (!data.items.length) { clearTimeout(timer); stage.innerHTML = ''; showMessage(`<div class="hint">${data.screenName || 'Screen'} is paired.<br>Assign a playlist with files in the admin panel.</div>`); return; }
+    hideMessage(); next();
+  }
+}
+function next() {
+  clearTimeout(timer);
+  if (!content || !content.items.length) return;
+  index = (index + 1) % content.items.length;
+  const it = content.items[index];
+  current = it.name;
+  if (it.type === 'image') {
+    const img = new Image();
+    img.onload = () => { stage.replaceChildren(img); timer = setTimeout(next, it.duration * 1000); };
+    img.onerror = () => { timer = setTimeout(next, 1000); };
+    img.src = it.url;
+  } else {
+    const v = document.createElement('video');
+    v.src = it.url; v.autoplay = true; v.muted = false; v.playsInline = true;
+    v.onended = next; v.onerror = () => { timer = setTimeout(next, 1000); };
+    stage.replaceChildren(v);
+    v.play().catch(() => { v.muted = true; v.play().catch(next); }); // browsers block autoplay with sound
+    if (content.items.length === 1) { v.loop = true; v.onended = null; }
+  }
+}
+register().then(apply).catch(() => showMessage('<div class="hint">Cannot reach server — retrying…</div>'));
+setInterval(poll, POLL_MS);
+document.addEventListener('dblclick', () => document.documentElement.requestFullscreen?.());
+</script>
+</body>
+</html>
