@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steel Signage — Dashboard</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --bg:#0b0d12; --panel:#141821; --line:#232937; --text:#eef1f6; --muted:#8d96a8; --accent:#ff5a1f; --ok:#22c55e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  a { color:inherit; }
+  header { padding:22px 20px 10px; max-width:1100px; margin:0 auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .logo { width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#ff5a1f,#ffb21f); display:grid; place-items:center; font-weight:800; color:#111; font-size:20px; }
+  h1 { font-size:22px; margin:0; letter-spacing:.2px; }
+  .sub { color:var(--muted); font-size:13px; }
+  main { max-width:1100px; margin:0 auto; padding:10px 20px 60px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin:12px 0 18px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .stat .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.6px; }
+  .stat .v { font-size:22px; font-weight:700; margin-top:2px; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--ok); margin-right:7px; box-shadow:0 0 0 4px rgba(34,197,94,.15); }
+  .actions { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-bottom:22px; }
+  .btn { display:flex; gap:12px; align-items:center; padding:16px; border-radius:12px; text-decoration:none; border:1px solid var(--line); background:var(--panel); cursor:pointer; color:var(--text); font:inherit; text-align:left; }
+  .btn:hover { border-color:#3a4256; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn .ic { font-size:24px; }
+  .btn b { display:block; }
+  .btn small { opacity:.8; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:18px; }
+  .card h2 { font-size:16px; margin:0 0 12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
+  .item { background:#0e1118; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .thumb { aspect-ratio:16/9; background:#000; position:relative; }
+  .thumb img, .thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+  .num { position:absolute; top:8px; left:8px; background:rgba(0,0,0,.7); border-radius:6px; padding:1px 8px; font-size:12px; font-weight:700; }
+  .meta { padding:9px 11px; }
+  .name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+  .tags { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:20px; background:#1d2230; color:var(--muted); }
+  .empty { text-align:center; padding:36px 10px; color:var(--muted); }
+  .steps { margin:0; padding-left:20px; color:#c9cfdb; }
+  .steps li { margin:6px 0; }
+  code { background:#0e1118; border:1px solid var(--line); border-radius:6px; padding:2px 6px; font-size:13px; word-break:break-all; }
+  .copy { margin-left:6px; font-size:12px; padding:3px 9px; border-radius:6px; border:1px solid var(--line); background:#1d2230; color:var(--text); cursor:pointer; }
+  #preview { position:fixed; inset:0; background:#000; display:none; z-index:10; }
+  #preview img, #preview video { width:100%; height:100%; object-fit:contain; position:absolute; inset:0; }
+  #preview .close { position:absolute; top:14px; right:14px; z-index:2; background:rgba(0,0,0,.6); color:#fff; border:1px solid #444; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; }
+  .err { color:#fca5a5; }
+  footer { color:var(--muted); font-size:12px; text-align:center; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">S</div>
+  <div>
+    <h1>Steel Signage</h1>
+    <div class="sub">Gym TV screens · Jubilee Hills</div>
+  </div>
+</header>
+
+<main>
+  <div class="stats">
+    <div class="stat"><div class="k">Status</div><div class="v" id="status">Loading…</div></div>
+    <div class="stat"><div class="k">Playing</div><div class="v" id="count">–</div></div>
+    <div class="stat"><div class="k">One full loop</div><div class="v" id="loop">–</div></div>
+    <div class="stat"><div class="k">Last changed</div><div class="v" id="updated" style="font-size:16px">–</div></div>
+  </div>
+
+  <div class="actions">
+    <a class="btn primary" id="editLink" target="_blank" rel="noopener" href="#">
+      <span class="ic">➕</span><span><b>Add / remove photos &amp; videos</b><small>Opens GitHub → Edit → drag files → Update release</small></span>
+    </a>
+    <button class="btn" id="previewBtn"><span class="ic">▶️</span><span><b>Preview the TV loop</b><small>See exactly what the TVs show</small></span></button>
+    <a class="btn" id="apkLink" href="#"><span class="ic">📺</span><span><b>Download TV app</b><small id="apkVer">Android TV / Fire TV / TV box</small></span></a>
+  </div>
+
+  <div class="card">
+    <h2><span>Now playing on the TVs <span class="sub">(in this order)</span></span><button class="copy" id="refresh">↻ Refresh</button></h2>
+    <div class="grid" id="list"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Install on a new TV</h2>
+    <ol class="steps">
+      <li>On the TV, install the free <b>Downloader</b> app from the Play Store / Amazon Appstore.</li>
+      <li>Open Downloader and type this link:<br><code id="apkText"></code><button class="copy" id="copyApk">Copy</button></li>
+      <li>Install, then open <b>Steel Signage</b>. Nothing to type: it starts playing automatically.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Tips</h2>
+    <ol class="steps">
+      <li><b>Order:</b> files play in name order. Name them <code>01-welcome.jpg</code>, <code>02-offer.mp4</code> and so on.</li>
+      <li><b>Photo time:</b> 10 seconds by default. For longer, end the name with seconds, like <code>offer_20s.jpg</code>.</li>
+      <li><b>Videos</b> play to the end. TVs update within about 1 minute of a change, and keep playing if the internet drops.</li>
+      <li>On a phone, if you don't see GitHub's <b>Edit</b> button, switch the browser to <b>Desktop site</b>.</li>
+    </ol>
+  </div>
+  <footer>Steel Signage · open source · content is public, so avoid private files</footer>
+</main>
+
+<div id="preview"><button class="close" id="closePreview">✕ Close preview</button><div id="stage"></div></div>
+
+<script>
+const OWNER = 'rohitsai-maker', REPO = 'steel-signage', TAG = 'gym-screen';
+const API = `https://api.github.com/repos/${OWNER}/${REPO}`;
+const APK = `https://github.com/${OWNER}/${REPO}/releases/latest/download/SteelSignage-TV.apk`;
+const IMG = ['jpg','jpeg','png','gif','bmp','webp'], VID = ['mp4','m4v','webm','mkv','mov'];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let items = [];
+
+$('editLink').href = `https://github.com/${OWNER}/${REPO}/releases/edit/${TAG}`;
+$('apkLink').href = APK; $('apkText').textContent = APK;
+$('copyApk').onclick = async () => { try { await navigator.clipboard.writeText(APK); $('copyApk').textContent = 'Copied ✓'; } catch { $('copyApk').textContent = 'Select & copy'; } };
+
+const ext = n => n.split('.').pop().toLowerCase();
+const secsOf = n => { const m = /[_-](\d{1,4})s\.[a-z0-9]+$/i.exec(n); return m ? +m[1] : 10; };
+const fmt = s => s >= 60 ? `${Math.floor(s/60)}m ${Math.round(s%60)}s` : `${Math.round(s)}s`;
+const ago = d => { const s = (Date.now() - new Date(d)) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s/60)+' min ago'; if (s < 86400) return Math.floor(s/3600)+' h ago'; return new Date(d).toLocaleString(); };
+
+async function load() {
+  try {
+    const r = await fetch(`${API}/releases/tags/${TAG}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status === 403 ? 'GitHub limit reached, try again in a few minutes' : 'GitHub error ' + r.status);
+    const rel = await r.json();
+    items = rel.assets.filter(a => IMG.concat(VID).includes(ext(a.name)))
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+      .map(a => ({ name: a.name, url: a.browser_download_url, type: VID.includes(ext(a.name)) ? 'video' : 'image',
+                   secs: VID.includes(ext(a.name)) ? null : secsOf(a.name), size: a.size, updated: a.updated_at }));
+    const last = [rel.published_at, ...rel.assets.map(a => a.updated_at)].filter(Boolean).sort().pop();
+    $('status').innerHTML = '<span class="dot"></span>Live';
+    $('count').textContent = items.length + (items.length === 1 ? ' file' : ' files');
+    $('updated').textContent = last ? ago(last) : '–';
+    render();
+  } catch (e) {
+    $('status').innerHTML = '<span class="err">Offline</span>';
+    $('list').innerHTML = `<div class="empty err">${esc(e.message)}</div>`;
+  }
+  try {
+    const l = await (await fetch(`${API}/releases/latest`, { cache: 'no-store' })).json();
+    if (l.tag_name) $('apkVer').textContent = `Version ${l.tag_name} · Android TV / Fire TV / TV box`;
+  } catch {}
+}
+
+function render() {
+  if (!items.length) {
+    $('list').innerHTML = '<div class="empty" style="grid-column:1/-1">No photos or videos yet.<br>Tap <b>Add / remove photos &amp; videos</b> above to add your first ones.</div>';
+    $('loop').textContent = '–'; return;
+  }
+  $('list').innerHTML = items.map((it, i) => `
+    <div class="item">
+      <div class="thumb">
+        ${it.type === 'image' ? `<img src="${esc(it.url)}" loading="lazy" alt="">`
+          : `<video src="${esc(it.url)}#t=1" muted preload="metadata" data-i="${i}"></video>`}
+        <span class="num">${i + 1}</span>
+      </div>
+      <div class="meta">
+        <div class="name" title="${esc(it.name)}">${esc(it.name)}</div>
+        <div class="tags"><span class="tag">${it.type === 'image' ? '🖼 ' + it.secs + 's' : '🎬 <span data-d="' + i + '">video</span>'}</span>
+        <span class="tag">${(it.size / 1e6).toFixed(1)} MB</span></div>
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('video[data-i]').forEach(v => v.addEventListener('loadedmetadata', () => {
+    const i = +v.dataset.i; items[i].secs = v.duration; const t = document.querySelector(`[data-d="${i}"]`); if (t) t.textContent = fmt(v.duration); total();
+  }));
+  total();
+}
+function total() { $('loop').textContent = fmt(items.reduce((s, it) => s + (it.secs || 0), 0)); }
+
+// Preview: plays the same loop as the TVs
+let pIdx = -1, pTimer;
+function pNext() {
+  clearTimeout(pTimer); if (!items.length) return;
+  pIdx = (pIdx + 1) % items.length; const it = items[pIdx]; const st = $('stage');
+  if (it.type === 'image') { const img = new Image(); img.src = it.url; img.onload = () => { st.replaceChildren(img); pTimer = setTimeout(pNext, it.secs * 1000); }; img.onerror = () => pTimer = setTimeout(pNext, 500); }
+  else { const v = document.createElement('video'); v.src = it.url; v.autoplay = true; v.muted = true; v.playsInline = true; v.onended = pNext; v.onerror = () => pTimer = setTimeout(pNext, 500); st.replaceChildren(v); v.play().catch(() => {}); }
+}
+$('previewBtn').onclick = () => { if (!items.length) return alertBox(); $('preview').style.display = 'block'; pIdx = -1; pNext(); document.documentElement.requestFullscreen?.().catch(() => {}); };
+$('closePreview').onclick = () => { clearTimeout(pTimer); $('stage').replaceChildren(); $('preview').style.display = 'none'; if (document.fullscreenElement) document.exitFullscreen(); };
+function alertBox() { $('list').scrollIntoView({ behavior: 'smooth' }); }
+$('refresh').onclick = load;
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
