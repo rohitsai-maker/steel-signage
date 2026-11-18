@@ -1,4 +1,4 @@
-Orientation: portrait-flipped
+Orientation: portrait
 Video turn: 0
 
 TV screen settings for Steel Signage. Change them from the dashboard:
