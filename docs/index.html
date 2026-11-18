@@ -92,7 +92,7 @@
   </div>
 
   <div class="card">
-    <h2><span>Screen orientation <span class="sub">(all TVs rotate within about 1 minute)</span></span></h2>
+    <h2><span>Screen orientation <span class="sub">(all TVs rotate within about 5 minutes)</span></span></h2>
     <div class="oris">
       <button class="ori" data-o="landscape"><div class="shape" style="width:56px;height:32px"></div>Landscape<small>Normal</small></button>
       <button class="ori" data-o="portrait"><div class="shape" style="width:32px;height:56px"></div>Portrait<small>TV standing upright</small></button>
@@ -129,7 +129,7 @@
       <li><b>Order:</b> files play in name order. Name them <code>01-welcome.jpg</code>, <code>02-offer.mp4</code> and so on.</li>
       <li><b>Photo time:</b> 10 seconds by default. For longer, end the name with seconds, like <code>offer_20s.jpg</code>.</li>
       <li><b>Videos</b> play to the end. TVs update within about 1 minute of a change, and keep playing if the internet drops.</li>
-      <li><b>Rotate the TVs:</b> open the release, click <b>Edit</b>, change the first line to <code>Orientation: portrait</code> (or <code>landscape</code>, <code>portrait-flipped</code>, <code>landscape-flipped</code>) and click <b>Update release</b>. TVs rotate within about 1 minute.</li>
+      <li><b>Rotate the TVs:</b> use the <b>Screen orientation</b> buttons above. The setting is kept in its own file (<code>settings.txt</code>), so adding or removing photos and videos never changes it.</li>
       <li><b>File size:</b> anything up to 2 GB per file. On GitHub’s edit page, drop files in the box <b>“Attach binaries by dropping them here”</b>, not in the text box above it (that one is limited to 10 MB and the TVs ignore it).</li>
       <li>On a phone, if you don't see GitHub's <b>Edit</b> button, switch the browser to <b>Desktop site</b>.</li>
     </ol>
@@ -203,10 +203,14 @@ async function load() {
     $('status').innerHTML = res.limited ? `<span class="dot" style="background:#f59e0b"></span>Saved copy` : '<span class="dot"></span>Live';
     $('count').textContent = items.length + (items.length === 1 ? ' file' : ' files');
     $('updated').textContent = last ? ago(last) : '–';
-    const om = /orientation\s*[:=]\s*(portrait-flipped|landscape-flipped|portrait|landscape)/i.exec(rel.body || '');
+    // Settings live in settings.txt (the TV app reads it first); the release notes are only a fallback
+    let stxt = null;
+    try { const s = await gh('/contents/settings.txt'); if (s.data && s.data.content) stxt = b64d(s.data.content); } catch {}
+    const src = stxt && ORE.test(stxt) ? stxt : (rel.body || '');
+    const om = ORE.exec(src);
     const ori = om ? om[1].toLowerCase() : 'landscape';
     current = { id: rel.id, body: rel.body || '', ori };
-    const tm = /video\s*turn\s*[:=]\s*(0|90|180|270)/i.exec(rel.body || '');
+    const tm = TRE.exec(src);
     const turn = tm ? tm[1] : '0';
     document.querySelectorAll('.turn').forEach(b => b.classList.toggle('on', b.dataset.t === turn));
     document.querySelectorAll('.ori[data-o]').forEach(b => b.classList.toggle('on', b.dataset.o === ori));
@@ -260,7 +264,7 @@ $('closePreview').onclick = () => { clearTimeout(pTimer); $('stage').replaceChil
 function alertBox() { $('list').scrollIntoView({ behavior: 'smooth' }); }
 $('refresh').onclick = load;
 
-// ---------- Orientation control (writes the "Orientation:" line of the Gym Screen release) ----------
+// ---------- Orientation control (writes settings.txt; release notes kept in step for older TV apps) ----------
 let current = null, pending = null, pendingTurn = null;
 const TOK_KEY = 'ss:token';
 function token() { try { return localStorage.getItem(TOK_KEY) || ''; } catch { return ''; } }
@@ -272,22 +276,46 @@ function authNote() {
   const d = $('disc'); if (d) d.onclick = e => { e.preventDefault(); try { localStorage.removeItem(TOK_KEY); } catch {} authNote(); toast('Disconnected'); };
 }
 $('tokLink').href = 'https://github.com/settings/personal-access-tokens/new?name=steel-dashboard&description=Steel+Signage+dashboard+settings&target_name=' + OWNER + '&expires_in=none&contents=write';
+const ORE = /orientation\s*[:=]\s*(portrait-flipped|landscape-flipped|portrait|landscape)/i;
+const TRE = /video\s*turn\s*[:=]\s*(0|90|180|270)/i;
+const b64d = x => decodeURIComponent(escape(atob(x.replace(/\s/g, ''))));
+const b64e = x => btoa(unescape(encodeURIComponent(x)));
+function withSetting(text, o, t) {
+  if (o) text = ORE.test(text) ? text.replace(ORE, 'Orientation: ' + o) : 'Orientation: ' + o + '\n' + text;
+  if (t != null) text = TRE.test(text) ? text.replace(TRE, 'Video turn: ' + t)
+    : ORE.test(text) ? text.replace(ORE, m => m + '\nVideo turn: ' + t) : 'Video turn: ' + t + '\n' + text;
+  return text;
+}
+// Saves to settings.txt (what the TV app reads; the upload page can never touch it),
+// and also to the release notes for any TV still running an older app.
+async function saveSetting(o, t) {
+  const tk = token();
+  const H = { Authorization: 'Bearer ' + tk, Accept: 'application/vnd.github+json' };
+  const g = await fetch(`${API}/contents/settings.txt`, { cache: 'no-store', headers: H });
+  if (g.status === 401) { try { localStorage.removeItem(TOK_KEY); } catch {} authNote(); throw new Error('The saved token was not accepted. Please connect again.'); }
+  let sha = null, text = 'Orientation: portrait\nVideo turn: 0\n\nTV screen settings for Steel Signage. Change them from the dashboard.\n';
+  if (g.ok) { const j = await g.json(); sha = j.sha; text = b64d(j.content); }
+  else if (g.status !== 404) throw new Error('GitHub error ' + g.status);
+  text = withSetting(text, o, t);
+  const put = { message: 'TV settings: ' + (o ? 'orientation ' + o : 'video turn ' + t), content: b64e(text) };
+  if (sha) put.sha = sha;
+  const r = await fetch(`${API}/contents/settings.txt`, { method: 'PUT', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(put) });
+  if (r.status === 401) { try { localStorage.removeItem(TOK_KEY); } catch {} authNote(); throw new Error('The saved token was not accepted. Please connect again.'); }
+  if (r.status === 403 || r.status === 404) throw new Error('This token cannot edit steel-signage. Give it Contents: Read and write on that repo.');
+  if (r.status === 409) throw new Error('Someone changed it at the same moment. Tap again.');
+  if (!r.ok) throw new Error('GitHub error ' + r.status);
+  try {
+    const rel = await (await fetch(`${API}/releases/tags/${TAG}`, { cache: 'no-store', headers: H })).json();
+    if (rel.id) await fetch(`${API}/releases/${rel.id}`, { method: 'PATCH', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: withSetting(rel.body || '', o, t) }) });
+  } catch {}
+}
 async function setOrientation(o) {
   if (!token()) { pending = o; $('modal').style.display = 'flex'; $('tokInput').focus(); return; }
   try {
-    const tk = token();
-    const rel = await (await fetch(`${API}/releases/tags/${TAG}`, { cache: 'no-store', headers: { Authorization: 'Bearer ' + tk } })).json();
-    if (!rel.id) throw new Error(rel.message || 'Could not read the release');
-    let body = rel.body || '';
-    const re = /orientation\s*[:=]\s*(portrait-flipped|landscape-flipped|portrait|landscape)/i;
-    body = re.test(body) ? body.replace(re, 'Orientation: ' + o) : 'Orientation: ' + o + '\n\n' + body;
-    const r = await fetch(`${API}/releases/${rel.id}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json', Accept: 'application/vnd.github+json' }, body: JSON.stringify({ body }) });
-    if (r.status === 401) { try { localStorage.removeItem(TOK_KEY); } catch {} authNote(); throw new Error('The saved token was not accepted. Please connect again.'); }
-    if (r.status === 403 || r.status === 404) throw new Error('This token cannot edit steel-signage. Give it Contents: Read and write on that repo.');
-    if (!r.ok) throw new Error('GitHub error ' + r.status);
+    await saveSetting(o, null);
     document.querySelectorAll('.ori[data-o]').forEach(b => b.classList.toggle('on', b.dataset.o === o));
     $('ori').textContent = (o.startsWith('portrait') ? '▯ ' : '▭ ') + o.charAt(0).toUpperCase() + o.slice(1);
-    toast('Saved: ' + o + '. TVs rotate within about 1 minute.');
+    toast('Saved: ' + o + '. TVs rotate within about 5 minutes.');
   } catch (e) { toast(e.message, 6000); }
 }
 document.querySelectorAll('.ori[data-o]').forEach(b => b.onclick = () => setOrientation(b.dataset.o));
@@ -295,19 +323,9 @@ document.querySelectorAll('.turn').forEach(b => b.onclick = () => setTurn(b.data
 async function setTurn(t) {
   if (!token()) { pendingTurn = t; $('modal').style.display = 'flex'; $('tokInput').focus(); return; }
   try {
-    const tk = token();
-    const rel = await (await fetch(`${API}/releases/tags/${TAG}`, { cache: 'no-store', headers: { Authorization: 'Bearer ' + tk } })).json();
-    if (!rel.id) throw new Error(rel.message || 'Could not read the release');
-    let body = rel.body || '';
-    const re = /video\s*turn\s*[:=]\s*(0|90|180|270)/i;
-    if (re.test(body)) body = body.replace(re, 'Video turn: ' + t);
-    else { const ore = /(orientation\s*[:=]\s*(?:portrait-flipped|landscape-flipped|portrait|landscape))/i;
-           body = ore.test(body) ? body.replace(ore, '$1\nVideo turn: ' + t) : 'Video turn: ' + t + '\n\n' + body; }
-    const r = await fetch(`${API}/releases/${rel.id}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json', Accept: 'application/vnd.github+json' }, body: JSON.stringify({ body }) });
-    if (r.status === 401) { try { localStorage.removeItem(TOK_KEY); } catch {} authNote(); throw new Error('The saved token was not accepted. Please connect again.'); }
-    if (!r.ok) throw new Error('GitHub error ' + r.status);
+    await saveSetting(null, t);
     document.querySelectorAll('.turn').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-    toast('Saved: videos turned ' + t + '°. TVs update within about 1 minute.');
+    toast('Saved: videos turned ' + t + '°. TVs update within about 5 minutes.');
   } catch (e) { toast(e.message, 6000); }
 }
 $('tokCancel').onclick = () => { $('modal').style.display = 'none'; pending = null; };
