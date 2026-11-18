@@ -1,0 +1,5 @@
+Orientation: portrait-flipped
+Video turn: 0
+
+TV screen settings for Steel Signage. Change them from the dashboard:
+https://rohitsai-maker.github.io/steel-signage/
